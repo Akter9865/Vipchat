@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # 1. Main Live Chat CRM Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vipchat_crm_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - APP_URL=${APP_URL:-http://localhost:3000}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_secure_pass_2026}@postgres:5432/${POSTGRES_DB:-vipchat}?schema=public
+      - SESSION_SECRET=${SESSION_SECRET:-super_secret_session_key_production_938472918374}
+      - JWT_SECRET=${JWT_SECRET:-super_secret_jwt_key_production_827391823719}
+      - SUPERADMIN_NAME=${SUPERADMIN_NAME:-VIP Master Admin}
+      - SUPERADMIN_EMAIL=${SUPERADMIN_EMAIL:-admin@vipchat.live}
+      - SUPERADMIN_PASSWORD=${SUPERADMIN_PASSWORD:-VipAdmin@2026!}
+      - STORAGE_PATH=/app/storage/uploads
+      - MAX_UPLOAD_SIZE_MB=50
+    volumes:
+      - media_storage:/app/storage/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vipchat_network
+
+  # 2. Dedicated Self-Hosted PostgreSQL 16 Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: vipchat_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_pass_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-vipchat}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vipchat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vipchat_network
+
+volumes:
+  postgres_data:
+    driver: local
+  media_storage:
+    driver: local
+
+networks:
+  vipchat_network:
+    driver: bridge

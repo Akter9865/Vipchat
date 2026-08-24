@@ -1,0 +1,381 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  AGENT
+}
+
+enum LeadStatus {
+  NEW_LEAD
+  CONTACTED
+  QUALIFIED
+  CONFIRMED
+  HIGH_VALUE
+  FOLLOW_UP
+  CONVERTED
+  NOT_INTERESTED
+  CLOSED
+}
+
+enum ConversationStatus {
+  ACTIVE
+  UNREAD
+  WAITING
+  CLOSED
+}
+
+enum PriorityLevel {
+  LOW
+  MEDIUM
+  HIGH
+  VIP
+}
+
+enum MessageSenderType {
+  CUSTOMER
+  AGENT
+  SYSTEM
+  AUTOMATION
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  VOICE_NOTE
+  DOCUMENT
+  SYSTEM_EVENT
+}
+
+model User {
+  id                String            @id @default(uuid())
+  email             String            @unique
+  passwordHash      String
+  fullName          String
+  role              UserRole          @default(AGENT)
+  avatarUrl         String?
+  isActive          Boolean           @default(true)
+  lastActiveAt      DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  assignedContacts      Contact[]         @relation("AssignedAgent")
+  assignedConversations Conversation[]    @relation("AssignedConvoAgent")
+  sessions              UserSession[]
+  internalNotes         InternalNote[]
+  auditLogs             AuditLog[]
+  messages              Message[]
+  createdTemplates      MessageTemplate[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model UserSession {
+  id           String    @id @default(uuid())
+  userId       String
+  token        String    @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model ContactSession {
+  id           String    @id @default(uuid())
+  contactId    String
+  sessionToken String    @unique
+  userAgent    String?
+  ipAddress    String?
+  deviceInfo   String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  contact      Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([sessionToken])
+}
+
+model Contact {
+  id                  String            @id @default(uuid())
+  fullName            String
+  mobileNumber        String
+  emailAddress        String?
+  avatarUrl           String?
+  leadStatus          LeadStatus        @default(NEW_LEAD)
+  leadScore           Int               @default(10)
+  source              String            @default("Website Live Chat")
+  marketingConsent    Boolean           @default(true)
+  customFields        Json?             @default("{}")
+  assignedAgentId     String?
+  isOnline            Boolean           @default(false)
+  lastActiveAt        DateTime          @default(now())
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  deletedAt           DateTime?
+
+  // Relations
+  assignedAgent       User?             @relation("AssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  conversations       Conversation[]
+  contactTags         ContactTag[]
+  sessions            ContactSession[]
+  internalNotes       InternalNote[]
+  automationLogs      AutomationLog[]
+
+  @@index([mobileNumber])
+  @@index([emailAddress])
+  @@index([leadStatus])
+  @@index([assignedAgentId])
+  @@index([createdAt])
+  @@index([lastActiveAt])
+}
+
+model Tag {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  description String?
+  colorHex    String        @default("#dfb75c")
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  contactTags ContactTag[]
+
+  @@index([name])
+}
+
+model ContactTag {
+  id        String   @id @default(uuid())
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tagId])
+  @@index([contactId])
+  @@index([tagId])
+}
+
+model Conversation {
+  id                  String             @id @default(uuid())
+  contactId           String
+  assignedAgentId     String?
+  status              ConversationStatus @default(ACTIVE)
+  priority            PriorityLevel      @default(MEDIUM)
+  isStarred           Boolean            @default(false)
+  unreadCustomerCount Int                @default(0)
+  unreadAgentCount    Int                @default(0)
+  lastMessageSnippet  String?
+  lastMessageAt       DateTime           @default(now())
+  closedAt            DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  // Relations
+  contact             Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedAgent       User?              @relation("AssignedConvoAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  messages            Message[]
+  internalNotes       InternalNote[]
+
+  @@index([contactId])
+  @@index([assignedAgentId])
+  @@index([status])
+  @@index([priority])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id              String            @id @default(uuid())
+  conversationId  String
+  senderType      MessageSenderType
+  senderUserId    String?
+  senderName      String
+  content         String
+  messageType     MessageType       @default(TEXT)
+  status          MessageStatus     @default(SENT)
+  replyToId       String?
+  isDeleted       Boolean           @default(false)
+  metadata        Json?             @default("{}")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  conversation    Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderUser      User?             @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+  replyTo         Message?          @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         Message[]         @relation("MessageReplies")
+  attachments     MessageAttachment[]
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+model MessageAttachment {
+  id           String      @id @default(uuid())
+  messageId    String
+  fileId       String?
+  fileName     String
+  fileUrl      String
+  fileType     String
+  fileSize     Int
+  mimeType     String
+  thumbnailUrl String?
+  createdAt    DateTime    @default(now())
+
+  message      Message     @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model InternalNote {
+  id             String       @id @default(uuid())
+  conversationId String?
+  contactId      String
+  authorId       String
+  content        String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  author         User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([conversationId])
+}
+
+model MessageTemplate {
+  id          String   @id @default(uuid())
+  title       String
+  category    String   @default("General")
+  content     String
+  shortcutKey String?
+  attachmentUrl String?
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([category])
+  @@index([isActive])
+}
+
+model Automation {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  triggerType String   // CUSTOMER_REGISTERED, FIRST_MESSAGE, STATUS_CHANGED, KEYWORD_MATCH, INACTIVITY
+  conditions  Json     @default("[]") // Array of { field, operator, value }
+  actions     Json     @default("[]") // Array of { actionType, payload }
+  isActive    Boolean  @default(true)
+  delaySeconds Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  logs        AutomationLog[]
+
+  @@index([triggerType])
+  @@index([isActive])
+}
+
+model AutomationLog {
+  id           String     @id @default(uuid())
+  automationId String
+  contactId    String?
+  triggerEvent String
+  status       String     // SUCCESS, SKIPPED, FAILED
+  details      Json?      @default("{}")
+  createdAt    DateTime   @default(now())
+
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  contact      Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([automationId])
+  @@index([createdAt])
+}
+
+model MediaFile {
+  id           String   @id @default(uuid())
+  originalName String
+  storedName   String
+  mimeType     String
+  sizeBytes    Int
+  storagePath  String
+  uploadedBy   String?
+  fileCategory String   // image, video, audio, document
+  createdAt    DateTime @default(now())
+
+  @@index([fileCategory])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  action      String   // LOGIN, LOGOUT, UPDATE_SETTINGS, EXPORT_CONTACTS, DELETE_MESSAGE, etc.
+  targetType  String   // CONTACT, CONVERSATION, USER, SETTING
+  targetId    String?
+  details     Json?    @default("{}")
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  title       String
+  message     String
+  type        String   // NEW_LEAD, NEW_MESSAGE, ASSIGNMENT, SYSTEM
+  linkUrl     String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([isRead])
+  @@index([createdAt])
+}
