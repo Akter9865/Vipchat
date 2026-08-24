@@ -1,6 +1,9 @@
 [build]
-  command = "npm run build:client"
+  command = "npm ci --include=dev && npm run build:client"
   publish = "dist"
+
+[build.environment]
+  NPM_FLAGS = "--include=dev"
 
 [[redirects]]
   from = "/*"
